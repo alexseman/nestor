@@ -1,0 +1,10 @@
+{
+  "defaultEnv": "development",
+  "development": {
+    "driver": "mysql8",
+    "host": "mysql",
+    "user": "root",
+    "database": "nestor",
+    "password": "secret"
+  }
+}

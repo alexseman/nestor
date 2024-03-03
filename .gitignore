@@ -1,0 +1,25 @@
+*.diff
+*.err
+*.log
+*.swp
+*.vi
+*~
+
+## OS or Editor folders
+*.sublime-workspace
+*.sublime-projects
+.DS_Store
+.cache
+.idea
+.project
+.settings
+.tmproj
+.iml
+Thumbs.db
+desktop.ini
+nbproject
+.devilbox
+
+dist
+.env
+/node_modules/
