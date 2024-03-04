@@ -1,9 +1,8 @@
 import 'dotenv/config';
-import 'module-alias/register';
-import App from './app';
-import validateEnv from '@/utils/validateEnv';
-import GroupController from '@/resources/group/group.controller';
-import PersonController from '@/resources/person/person.controller';
+import validateEnv from './utils/validateEnv.js';
+import App from './app.js';
+import GroupController from './resources/group/group.controller.js';
+import PersonController from './resources/person/person.controller.js';
 
 validateEnv();
 const app = new App(

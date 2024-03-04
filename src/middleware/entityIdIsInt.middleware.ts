@@ -1,6 +1,6 @@
 import { NextFunction, Response } from 'express';
-import ApiRequest from '@/utils/types/apiRequest.type';
-import HttpException from '@/utils/exceptions/http.exception';
+import ApiRequest from '../utils/types/apiRequest.type.js';
+import HttpException from '../utils/exceptions/http.exception.js';
 
 const entityIdIsInt = (req: ApiRequest, res: Response, next: NextFunction) => {
     // @ts-ignore

@@ -1,50 +1,54 @@
 version: '3'
 services:
-  redis:
-    image: redis:7.2.3-alpine
-    container_name: nestor_redis
-    command: [ "redis-server", "--appendonly", "yes" ]
-    networks:
-      - nestornet0
-    ports:
-      - '6379:6379'
-    restart: always
-    tty: true
-    volumes:
-      - redis_data:/data
-  api:
-    build:
-      dockerfile: api.Dockerfile
-    container_name: nestor_api
-    volumes:
-      - './src/node_modules:/app/node_modules/'
-      - './:/app'
-    networks:
-      - nestornet0
-    ports:
-      - '5000:5000'
-    tty: true
-  db:
-    hostname: mysql
-    container_name: nestor_db
-    image: mysql
-    restart: always
-    networks:
-      - nestornet0
-    environment:
-      MYSQL_DATABASE: nestor
-      MYSQL_ROOT_PASSWORD: secret
-    ports:
-      - '3306:3306'
-    volumes:
-      - mysql_data:/var/lib/mysql
+    redis:
+        image: redis:7.2.3-alpine
+        container_name: nestor_redis
+        command: ['redis-server', '--appendonly', 'yes']
+        networks:
+            - nestornet0
+        ports:
+            - '6379:6379'
+        restart: always
+        tty: true
+        volumes:
+            - redis_data:/data
+    api:
+        build:
+            dockerfile: api.Dockerfile
+        container_name: nestor_api
+        volumes:
+            - './node_modules:/app/node_modules/'
+            - './:/app'
+        networks:
+            - nestornet0
+        ports:
+            - '5000:5000'
+        tty: true
+    db:
+        hostname: mysql
+        container_name: nestor_db
+        image: mysql
+        command:
+            mysqld --general-log=1 --general-log-file=/var/log/mysql/mysql.log
+        restart: always
+        networks:
+            - nestornet0
+        environment:
+            MYSQL_DATABASE: ${DB_DATABASE}
+            MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+        ports:
+            - '3306:3306'
+        volumes:
+            - mysql_data:/var/lib/mysql
+            - './my.cnf:/etc/my.cnf'
+            - './log/mysql:/var/log/mysql'
 networks:
-  nestornet0:
-    driver: bridge
-    driver_opts:
-      com.docker.network.enable_ipv6: 'false'
+    nestornet0:
+        driver: bridge
+        driver_opts:
+            com.docker.network.enable_ipv6: 'false'
 volumes:
-  redis_data:
-    external: false
-  mysql_data:
-    external: false
+    redis_data:
+        external: false
+    mysql_data:
+        external: false

@@ -1,7 +1,11 @@
-import {Request} from "express";
+import { Request } from 'express';
 
 type ApiRequest = Request & {
-  id?: number
+    id?: number;
+    personFilters?: {
+        first_name?: string;
+        last_name?: string;
+    };
 };
 
 export default ApiRequest;

@@ -1,22 +1,27 @@
-import Controller from '@/utils/abstractions/controller.interface';
 import { NextFunction, Request, Response, Router } from 'express';
-import personRepository from '@/resources/person/person.repository';
-import validate from '@/resources/person/person.validation';
-import validationMiddleware from '@/middleware/validation.middleware';
-import entityIdIsInt from '@/middleware/entityIdIsInt.middleware';
-import ApiRequest from '@/utils/types/apiRequest.type';
+import Controller from '../../utils/abstractions/controller.interface.js';
+import entityIdIsInt from '../../middleware/entityIdIsInt.middleware.js';
+import validationMiddleware from '../../middleware/validation.middleware.js';
+import ApiRequest from '../../utils/types/apiRequest.type.js';
+import ApiResponse from '../../utils/apiResponse.js';
+import validate from './person.validation.js';
+import PersonRepository from './person.repository.js';
 
 class PersonController implements Controller {
-    public path = '/Persons';
+    public path = '/persons';
     public router = Router();
-    private personRepository = new personRepository();
+    private personRepository: PersonRepository = new PersonRepository();
 
     constructor() {
         this.initializeRoutes();
     }
 
     private initializeRoutes(): void {
-        this.router.get(`${this.path}/groups-above/:id`, entityIdIsInt, this.groupsAbove);
+        this.router.get(
+            `${this.path}/groups-above/:id`,
+            entityIdIsInt,
+            this.groupsAbove
+        );
         this.router.post(
             `${this.path}`,
             validationMiddleware(validate.create),
@@ -37,7 +42,7 @@ class PersonController implements Controller {
     ): Promise<Response | void> => {
         try {
             const above = await this.personRepository.groupsAbove(req.id);
-            res.status(200).send({ success: true, data: above });
+            ApiResponse.respond(res, 201, above);
         } catch (e) {
             next(e);
         }
@@ -49,12 +54,13 @@ class PersonController implements Controller {
         next: NextFunction
     ): Promise<Response | void> => {
         try {
-            const created = await this.personRepository.create(
-                req.body.first_name,
-                req.body.last_name,
-                req.body.group_id
-            );
-            res.status(201).send({ success: true, data: { ...created } });
+            const created = await this.personRepository.create({
+                first_name: req.body.first_name,
+                last_name: req.body.last_name,
+                job_title: req.body.job_title,
+                group_id: req.body.group_id,
+            });
+            ApiResponse.respond(res, 201, created);
         } catch (e) {
             next(e);
         }
@@ -69,9 +75,10 @@ class PersonController implements Controller {
             const updated = await this.personRepository.update(req.id, {
                 first_name: req.body.first_name,
                 last_name: req.body.last_name,
+                job_title: req.body.job_title,
                 group_id: req.body.group_id,
             });
-            res.status(200).send({ success: true, data: { ...updated } });
+            ApiResponse.respond(res, 200, updated);
         } catch (e) {
             next(e);
         }
@@ -85,6 +92,11 @@ class PersonController implements Controller {
         try {
             await this.personRepository.delete(req.id);
             res.status(200).send({ success: true });
+            ApiResponse.respond(
+                res,
+                200,
+                `Successfully deleted person ${req.id}`
+            );
         } catch (e) {
             next(e);
         }

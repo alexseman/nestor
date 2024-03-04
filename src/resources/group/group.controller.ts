@@ -1,15 +1,18 @@
-import Controller from '@/utils/abstractions/controller.interface';
 import { NextFunction, Request, Response, Router } from 'express';
-import GroupRepository from '@/resources/group/group.repository';
-import validate from '@/resources/group/group.validation';
-import validationMiddleware from '@/middleware/validation.middleware';
-import entityIdIsInt from '@/middleware/entityIdIsInt.middleware';
-import ApiRequest from '@/utils/types/apiRequest.type';
+import Controller from '../../utils/abstractions/controller.interface.js';
+import GroupRepository from './group.repository.js';
+import entityIdIsInt from '../../middleware/entityIdIsInt.middleware.js';
+import personFilters from '../../middleware/personFilters.js';
+import validationMiddleware from '../../middleware/validation.middleware.js';
+import ApiRequest from '../../utils/types/apiRequest.type.js';
+import ApiResponse from '../../utils/apiResponse.js';
+import CacheHelper from '../../utils/cacheHelper.js';
+import validate from './group.validation.js';
 
 class GroupController implements Controller {
     public path = '/groups';
     public router = Router();
-    private groupRepository = new GroupRepository();
+    private groupRepository: GroupRepository = new GroupRepository();
 
     constructor() {
         this.initializeRoutes();
@@ -17,6 +20,11 @@ class GroupController implements Controller {
 
     private initializeRoutes(): void {
         this.router.get(`${this.path}`, this.all);
+        this.router.get(
+            `${this.path}/subgroups/:id?`,
+            [entityIdIsInt, personFilters],
+            this.subGroups
+        );
         this.router.post(
             `${this.path}`,
             validationMiddleware(validate.create),
@@ -30,14 +38,45 @@ class GroupController implements Controller {
         this.router.delete(`${this.path}/:id`, entityIdIsInt, this.delete);
     }
 
+    private subGroups = async (
+        req: ApiRequest,
+        res: Response,
+        next: NextFunction
+    ): Promise<Response | void> => {
+        try {
+            const subGroupsCall = () =>
+                this.groupRepository.subGroupsLinear.bind(this.groupRepository)(
+                    req.id,
+                    req.personFilters
+                );
+
+            // do not cache filtered requests
+            if (Object.values(req.personFilters).length) {
+                ApiResponse.respond(res, 200, await subGroupsCall());
+                return;
+            }
+
+            const subGroups = await CacheHelper.getOrSet(
+                `groups:subgroups:${req.id}`,
+                subGroupsCall
+            );
+            ApiResponse.respond(res, 200, subGroups);
+        } catch (e) {
+            next(e);
+        }
+    };
+
     private all = async (
         req: Request,
         res: Response,
         next: NextFunction
     ): Promise<Response | void> => {
         try {
-            const all = await this.groupRepository.all();
-            res.status(200).send({ success: true, data: all });
+            const all = await CacheHelper.getOrSet(
+                'groups:subgroups:all',
+                this.groupRepository.all.bind(this.groupRepository)
+            );
+            ApiResponse.respond(res, 200, all);
         } catch (e) {
             next(e);
         }
@@ -53,7 +92,7 @@ class GroupController implements Controller {
                 req.body.name,
                 req.body.parent_id
             );
-            res.status(201).send({ success: true, data: { ...created } });
+            ApiResponse.respond(res, 201, created);
         } catch (e) {
             next(e);
         }
@@ -69,7 +108,7 @@ class GroupController implements Controller {
                 name: req.body.name,
                 parent_id: req.body.parent_id,
             });
-            res.status(200).send({ success: true, data: { ...updated } });
+            ApiResponse.respond(res, 200, updated);
         } catch (e) {
             next(e);
         }
@@ -82,7 +121,11 @@ class GroupController implements Controller {
     ): Promise<Response | void> => {
         try {
             await this.groupRepository.delete(req.id);
-            res.status(200).send({ success: true });
+            ApiResponse.respond(
+                res,
+                200,
+                `Successfully deleted group ${req.id}`
+            );
         } catch (e) {
             next(e);
         }

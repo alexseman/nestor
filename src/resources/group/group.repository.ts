@@ -1,20 +1,58 @@
-import Repository from '@/utils/abstractions/repository.abstract';
 import { RowDataPacket } from 'mysql2/promise';
-import { GroupResult } from '@/resources/group/group.type';
-import HttpException from '@/utils/exceptions/http.exception';
-import DatabaseConnection from '@/database/databaseConnection';
-import PersonRepository from "@/resources/person/person.repository";
+import Repository from '../../utils/abstractions/repository.abstract.js';
+import { GroupResult } from './group.type.js';
+import HttpException from '../../utils/exceptions/http.exception.js';
 
 class GroupRepository extends Repository {
+    static table: string = '`groups`';
+
     public constructor() {
         super();
-        this.table = '`groups`';
+    }
+
+    public async subGroupsLinear(startNodeId: number, filters: object) {
+        const params: string | number[] = [startNodeId];
+        const filterStrings: string[] = Object.keys(filters).map(
+            (k: string): string => {
+                // @ts-ignore
+                params.push(filters[k]);
+                return ` AND p.${k} LIKE CONCAT("%", REPLACE("?", "'", ""), "%")`;
+            }
+        );
+
+        return (
+            await this.db.query(
+                `
+                    SELECT g.id,
+                           g.name,
+                           g.parent_id,
+                           g.lft,
+                           JSON_ARRAYAGG(IF(p.id IS NULL, NULL, JSON_OBJECT('id', p.id, 'first_name', p.first_name,
+                                                                            'last_name', p.last_name, 'job_title',
+                                                                            p.job_title))) AS persons
+                    FROM ${GroupRepository.table} AS parent,
+                         ${GroupRepository.table} AS g
+                             LEFT JOIN persons p ON g.id = p.group_id
+                    WHERE 1
+                      AND parent.id = ?
+                      AND g.lft > parent.lft
+                      AND g.rgt < parent.rgt
+                        ${filterStrings.join('')}
+                    GROUP BY g.id, g.lft
+                    ORDER BY g.lft`,
+                params
+            )
+        )[0] as RowDataPacket[];
     }
 
     public async all() {
-        const db = await DatabaseConnection.getInstanceAsync();
         let tree: RowDataPacket;
-        const toTree = function (items: RowDataPacket[], root: null|RowDataPacket) {
+
+        // TODO: make this a module
+        const toTree = function (
+            items: RowDataPacket[],
+            root: null | RowDataPacket
+        ) {
             let filteredItems: RowDataPacket[] = Array.from(items);
 
             if (root !== null) {
@@ -29,34 +67,47 @@ class GroupRepository extends Repository {
                     tree = item;
                 }
 
-                item.groups = toTree(items, item);
-            }
-        }
+                if (Array.isArray(item.persons) && !item.persons.pop()) {
+                    delete item.persons;
+                }
 
-        const result = (await db.query(`
-            SELECT g.id,
-                   g.parent_id,
-                   g.lft,
-                   g.name,
-                   JSON_ARRAYAGG(JSON_OBJECT('id', p.id, 'first_name', p.first_name,
-                                             'last_name', p.last_name)) AS persons
-            FROM ${this.table} g
-                     JOIN persons p ON g.id = p.group_id
-            GROUP BY g.id, g.lft
-            ORDER BY g.lft`))[0] as RowDataPacket[];
+                item.groups = toTree(items, item);
+
+                if (Array.isArray(item.persons) && !item.persons.pop()) {
+                    delete item.persons;
+                }
+
+                if (!item.groups.length) {
+                    delete item.groups;
+                }
+            }
+        };
+
+        const result = (
+            await this.db.query(`
+                SELECT g.id,
+                       g.parent_id,
+                       g.lft,
+                       g.name,
+                       JSON_ARRAYAGG(IF(p.id IS NULL, NULL, JSON_OBJECT('id', p.id, 'first_name', p.first_name,
+                                                                        'last_name', p.last_name, 'job_title',
+                                                                        p.job_title))) AS persons
+                FROM ${GroupRepository.table} AS g
+                         LEFT JOIN persons p ON g.id = p.group_id
+                GROUP BY g.id, g.lft
+                ORDER BY g.lft`)
+        )[0] as RowDataPacket[];
 
         toTree(result, null);
         return tree;
     }
 
     public async create(name: string, parentId: null | number) {
-        const db = await DatabaseConnection.getInstanceAsync();
-
         const getParentBounds = async (): Promise<GroupResult> => {
             if (parentId === null) {
-                const [result] = await db.execute(`SELECT lft, rgt
-                                                   FROM ${this.table}
-                                                   WHERE parent_id IS NULL`);
+                const [result] = await this.db.execute(`SELECT lft, rgt
+                                                        FROM ${GroupRepository.table}
+                                                        WHERE parent_id IS NULL`);
 
                 if ((result as []).length) {
                     throw new HttpException(400, 'Root group already exists');
@@ -68,15 +119,18 @@ class GroupRepository extends Repository {
                 };
             }
 
-            const [result] = await (db.execute(
+            const [result] = await (this.db.execute(
                 `SELECT lft, rgt
-                 FROM ${this.table}
+                 FROM ${GroupRepository.table}
                  WHERE id = ?`,
                 [parentId]
             ) as Promise<RowDataPacket[]>);
 
             if (!(result as []).length) {
-                throw new Error(`Node with id of ${parentId} not found.`);
+                throw new HttpException(
+                    404,
+                    `Parent node with id of ${parentId} not found.`
+                );
             }
 
             return (result as []).pop();
@@ -84,16 +138,15 @@ class GroupRepository extends Repository {
 
         const parentBounds: GroupResult = await getParentBounds();
 
-        try {
-            await db.beginTransaction();
-            await db.execute(
-                `UPDATE ${this.table}
+        await this.performTransaction(async () => {
+            await this.db.execute(
+                `UPDATE ${GroupRepository.table}
                  SET rgt = rgt + 2
                  WHERE rgt >= ?`,
                 [parentBounds.rgt]
             );
-            await db.execute(
-                `UPDATE ${this.table}
+            await this.db.execute(
+                `UPDATE ${GroupRepository.table}
                  SET lft = lft + 2
                  WHERE lft > ?`,
                 [
@@ -103,16 +156,12 @@ class GroupRepository extends Repository {
                         : parentBounds.rgt,
                 ]
             );
-            await db.execute(
-                `INSERT INTO ${this.table} (lft, rgt, parent_id, name)
+            await this.db.execute(
+                `INSERT INTO ${GroupRepository.table} (lft, rgt, parent_id, name)
                  VALUES (?, ?, ?, ?)`,
                 [parentBounds.rgt, parentBounds.rgt + 1, parentId, name]
             );
-            await db.commit();
-        } catch (e) {
-            await db.rollback();
-            throw e;
-        }
+        }, 'groups:subgroups:*');
 
         return {
             name,
@@ -124,10 +173,9 @@ class GroupRepository extends Repository {
         id: number,
         fields: { name?: string; parent_id?: number }
     ) {
-        const db = await DatabaseConnection.getInstanceAsync();
-        const [current] = await db.execute(
+        const [current] = await this.db.execute(
             `SELECT name, parent_id
-             FROM ${this.table}
+             FROM ${GroupRepository.table}
              WHERE id = ?`,
             [id]
         );
@@ -139,9 +187,9 @@ class GroupRepository extends Repository {
         const currentNode: GroupResult = (current as []).pop();
 
         if (fields.name) {
-            await db.execute(
+            await this.db.execute(
                 `
-                    UPDATE ${this.table}
+                    UPDATE ${GroupRepository.table}
                     SET name = ?
                     WHERE id = ?
                 `,
@@ -149,16 +197,16 @@ class GroupRepository extends Repository {
             );
 
             if (!fields.parent_id) {
-                // cache invalidation
+                await this.invalidateCache(`groups:subgroups:${id}`);
                 return {
                     name: fields.name,
                 };
             }
         }
 
-        const [parent] = await db.execute(
+        const [parent] = await this.db.execute(
             `SELECT name, parent_id, lft, rgt
-             FROM ${this.table}
+             FROM ${GroupRepository.table}
              WHERE id = ?`,
             [fields.parent_id]
         );
@@ -181,13 +229,11 @@ class GroupRepository extends Repository {
 
         const nodeSize: number = currentNode.rgt - currentNode.lft + 1;
 
-        try {
-            await db.beginTransaction();
-
+        await this.performTransaction(async () => {
             // temporary "remove" moving node
-            await db.execute(
+            await this.db.execute(
                 `
-                    UPDATE ${this.table}
+                    UPDATE ${GroupRepository.table}
                     SET lft = 0 - (lft),
                         rgt = 0 - (rgt)
                     WHERE lft >= ?
@@ -197,17 +243,17 @@ class GroupRepository extends Repository {
             );
 
             // decrease left and/or right position values of currently 'lower' items (and parents)
-            await db.execute(
+            await this.db.execute(
                 `
-                    UPDATE ${this.table}
+                    UPDATE ${GroupRepository.table}
                     SET lft = (lft) - ?
                     WHERE lft > ?
                 `,
                 [nodeSize, currentNode.rgt]
             );
-            await db.execute(
+            await this.db.execute(
                 `
-                    UPDATE ${this.table}
+                    UPDATE ${GroupRepository.table}
                     SET rgt = (rgt) - ?
                     WHERE rgt > ?
                 `,
@@ -215,9 +261,9 @@ class GroupRepository extends Repository {
             );
 
             // increase left and/or right position values of future 'lower' items (and parents)
-            await db.execute(
+            await this.db.execute(
                 `
-                    UPDATE ${this.table}
+                    UPDATE ${GroupRepository.table}
                     SET lft = (lft) + ?
                     WHERE lft >=
                           IF(? > ?, ? - ?, ?)
@@ -231,9 +277,9 @@ class GroupRepository extends Repository {
                     newParentNode.rgt,
                 ]
             );
-            await db.execute(
+            await this.db.execute(
                 `
-                    UPDATE ${this.table}
+                    UPDATE ${GroupRepository.table}
                     SET rgt = (rgt) + ?
                     WHERE rgt >=
                           IF(? > ?, ? - ?, ?)
@@ -249,9 +295,9 @@ class GroupRepository extends Repository {
             );
 
             // move node (ant its sub-nodes) and update its parent item id
-            await db.execute(
+            await this.db.execute(
                 `
-                    UPDATE ${this.table}
+                    UPDATE ${GroupRepository.table}
                     SET lft = 0 - (lft) +
                               IF(? > ?, ? - ? - 1,
                                  ? - ? - 1 + ?),
@@ -280,31 +326,25 @@ class GroupRepository extends Repository {
                     currentNode.rgt,
                 ]
             );
-            await db.execute(
+            await this.db.execute(
                 `
-                    UPDATE ${this.table}
+                    UPDATE ${GroupRepository.table}
                     SET parent_id = ?
                     WHERE id = ?
                 `,
                 [fields.parent_id, id]
             );
-            await db.commit();
-        } catch (e) {
-            await db.rollback();
-            throw e;
-        }
+        }, 'groups:subgroups:*');
 
-        // cache invalidation
         return {
             parent_id: fields.parent_id,
         };
     }
 
     public async delete(id: null | number) {
-        const db = await DatabaseConnection.getInstanceAsync();
-        const [current] = await db.execute(
+        const [current] = await this.db.execute(
             `SELECT lft, rgt, (rgt - lft + 1) as depth
-             FROM ${this.table}
+             FROM ${GroupRepository.table}
              WHERE id = ?`,
             [id]
         );
@@ -315,32 +355,27 @@ class GroupRepository extends Repository {
 
         const currentNode: GroupResult = (current as []).pop();
 
-        try {
-            await db.beginTransaction();
-            await db.execute(
+        await this.performTransaction(async () => {
+            await this.db.execute(
                 `DELETE
-                 FROM ${this.table}
+                 FROM ${GroupRepository.table}
                  WHERE lft BETWEEN ? AND ?`,
                 [currentNode.lft, currentNode.rgt]
             );
-            await db.execute(
-                `UPDATE ${this.table}
+            await this.db.execute(
+                `UPDATE ${GroupRepository.table}
                  SET rgt = rgt - ?
                  WHERE rgt > ?`,
                 [currentNode.depth, currentNode.rgt]
             );
-            await db.execute(
-                `UPDATE ${this.table}
+            await this.db.execute(
+                `UPDATE ${GroupRepository.table}
                  SET lft = lft - ?
                  WHERE lft > ?`,
                 [currentNode.depth, currentNode.lft]
             );
-            await db.commit();
-        } catch (e) {
-            await db.rollback();
-            throw e;
-        }
-        // update cache
+            await this.db.commit();
+        }, 'groups:subgroups:*');
     }
 }
 
