@@ -12,6 +12,10 @@ const personFilters = (req: ApiRequest, res: Response, next: NextFunction) => {
         req.personFilters.last_name = req.query.last_name as string;
     }
 
+    if (req.query.job_title && req.query.job_title.length) {
+        req.personFilters.job_title = req.query.job_title as string;
+    }
+
     next();
 };
 

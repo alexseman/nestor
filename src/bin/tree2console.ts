@@ -1,17 +1,17 @@
 import { RowDataPacket } from 'mysql2/promise';
-import util from 'util';
 import 'dotenv/config';
 import DatabaseConnection from '@/database/databaseConnection.js';
+import process from 'process';
 
 async function run(): Promise<void> {
     const db = await DatabaseConnection.getInstanceAsync();
 
     const [results, fields] = await db.query<RowDataPacket[]>(
-        'SELECT * FROM `groups2` ORDER BY parent_id'
+        'SELECT * FROM `groups` ORDER BY parent_id'
     );
 
     tree2console(results, null);
-    console.log(util.inspect(representation, false, null, true));
+    // console.log(util.inspect(representation, false, null, true));
     nice(representation);
 }
 
@@ -37,10 +37,25 @@ function tree2console(items: RowDataPacket[], root: null | RowDataPacket) {
 }
 
 function nice(items: RowDataPacket[], prefix = '-') {
+    const padding = (number: number | null, maxLength: number = 3) => {
+        if (!number) {
+            return number;
+        }
+
+        const length: number = String(number).length;
+        return `${number}${' '.repeat(maxLength - length)}`;
+    };
+
     for (const item of items) {
-        console.log('\n' + prefix + `[${item.id}] ${item.name}`);
+        console.log(
+            '\n' +
+                prefix +
+                `   [LFT: ${padding(item.lft)}] [RGT: ${padding(item.rgt)}] [ID: ${padding(item.id)}] [PARENT: ${padding(item.parent_id)}] ${item.name}`
+        );
+        console.log(`${' '.repeat(prefix.length)}   |`);
         nice(item.children, prefix + '-');
     }
 }
 
-run();
+await run();
+process.exit(0);

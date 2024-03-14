@@ -174,7 +174,7 @@ class GroupRepository extends Repository {
         fields: { name?: string; parent_id?: number }
     ) {
         const [current] = await this.db.execute(
-            `SELECT name, parent_id
+            `SELECT name, parent_id, lft, rgt
              FROM ${GroupRepository.table}
              WHERE id = ?`,
             [id]
@@ -197,7 +197,7 @@ class GroupRepository extends Repository {
             );
 
             if (!fields.parent_id) {
-                await this.invalidateCache(`groups:subgroups:${id}`);
+                this.invalidateCache(`groups:subgroups:${id}`);
                 return {
                     name: fields.name,
                 };
@@ -218,9 +218,8 @@ class GroupRepository extends Repository {
             );
         }
 
-        const newParentNode: GroupResult = (current as []).pop();
-
-        if (newParentNode.parent_id === id) {
+        const newParentNode: GroupResult = (parent as []).pop();
+        if (newParentNode.parent_id && newParentNode.parent_id === id) {
             throw new HttpException(
                 400,
                 'Cannot have the father and child nodes to switch roles'

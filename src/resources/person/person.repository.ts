@@ -45,7 +45,7 @@ class PersonRepository extends Repository {
         fields: PersonCreateUpdatePayloadType
     ): Promise<PersonResult> {
         const [current] = await this.db.execute(
-            `SELECT first_name, last_name, group_id
+            `SELECT first_name, last_name, job_title, group_id
              FROM ${PersonRepository.table}
              WHERE id = ?`,
             [id]
@@ -59,7 +59,7 @@ class PersonRepository extends Repository {
         }
 
         const currentNode: PersonResult = (current as []).pop();
-        const updatables: string | number[] = [id];
+        const updatables: string | number[] = [];
         const sql = Object.keys(fields)
             .map((field: string) => {
                 const fieldValue = (fields as any)[field];
@@ -69,6 +69,7 @@ class PersonRepository extends Repository {
             })
             .join(',');
 
+        updatables.push(id);
         if (updatables.length === 1) {
             throw new HttpException(400, `No fields set to update`);
         }
